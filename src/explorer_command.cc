@@ -134,7 +134,7 @@ class __declspec(uuid(DLL_UUID)) ExplorerCommandHandler final : public RuntimeCl
             return E_FAIL;
         }
     }
-    
+
     // doesn't work, had to use hardcoded "Program Files" path
     // if (!std::filesystem::exists(module_path)) {
     //   PWSTR ProgramFilesPath = nullptr;
@@ -204,21 +204,47 @@ class __declspec(uuid(DLL_UUID)) ExplorerCommandHandler final : public RuntimeCl
           //   }
           // }
 
+          std::wstring args = L"--new-window";
+
+          bool isFirstFile = false;
+          std::wstring parentDir;
+
           DWORD count;
           RETURN_IF_FAILED(items->GetCount(&count));
           for (DWORD i = 0; i < count; ++i) {
-              ComPtr<IShellItem> item;
-              auto result = items->GetItemAt(i, &item);
+            ComPtr<IShellItem> item;
+            auto result = items->GetItemAt(i, &item);
+            if (SUCCEEDED(result)) {
+              wil::unique_cotaskmem_string path;
+              result = item->GetDisplayName(SIGDN_FILESYSPATH, &path);
               if (SUCCEEDED(result)) {
-                  wil::unique_cotaskmem_string path;
-                  result = item->GetDisplayName(SIGDN_FILESYSPATH, &path);
-                  if (SUCCEEDED(result)) {
-                      HINSTANCE ret = ShellExecuteW(nullptr, L"open", module_path.c_str(), QuoteForCommandLineArg(path.get()).c_str(), nullptr, SW_SHOW);
-                      if ((INT_PTR)ret <= HINSTANCE_ERROR) {
-                          RETURN_LAST_ERROR();
-                      }
+                args += L" ";
+                args += QuoteForCommandLineArg(path.get());
+
+                if (!i) {
+                  DWORD attributes = SFGAO_FOLDER;
+                  if (SUCCEEDED(item->GetAttributes(SFGAO_FOLDER, &attributes))) {
+                    if (!(attributes & SFGAO_FOLDER)) {
+                      isFirstFile = true;
+                      wchar_t parent_path[MAX_PATH];
+                      wcscpy_s(parent_path, path.get());
+                      PathRemoveFileSpecW(parent_path);
+                      parentDir = parent_path;
+                    }
                   }
+                }
               }
+            }
+          }
+
+          if (isFirstFile && !parentDir.empty()) {
+            args += L" --goto ";
+            args += QuoteForCommandLineArg(parentDir.c_str());
+          }
+
+          HINSTANCE ret = ShellExecuteW(nullptr, L"open", module_path.c_str(), args.c_str(), nullptr, SW_SHOW);
+          if ((INT_PTR)ret <= HINSTANCE_ERROR) {
+            RETURN_LAST_ERROR();
           }
       }
       return S_OK;
